@@ -20,6 +20,8 @@ func (h *BookmarkHandler) Register(router *gin.RouterGroup) {
 	router.POST("/", h.Create)
 	router.GET("/", h.List)
 	router.GET("/:id", h.GetById)
+	router.PUT("/:id", h.Update)
+	router.DELETE("/:id", h.Delete)
 }
 
 func NewBookmarkHandler(service service.BookmarkService) *BookmarkHandler {
@@ -80,4 +82,53 @@ func (h *BookmarkHandler) GetById(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, dto.FromDomain(bookmark))
+}
+
+func (h *BookmarkHandler) Delete(ctx *gin.Context) {
+	bookMarkId, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		response.Error(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	err = h.service.Delete(ctx, bookMarkId)
+
+	if errors.Is(err, repository.ErrNotFound) {
+		response.Error(ctx, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if err != nil {
+		response.Error(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ctx.Status(http.StatusAccepted)
+}
+
+func (h *BookmarkHandler) Update(ctx *gin.Context) {
+	var req dto.CreateBookmarkRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		response.Error(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	bookmarkId, err := uuid.Parse(ctx.Param("id"))
+	if err != nil {
+		response.Error(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	update, err := h.service.Update(ctx, bookmarkId, req.ToInput())
+	if errors.Is(err, repository.ErrNotFound) {
+		response.Error(ctx, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if err != nil {
+		response.Error(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ctx.JSON(http.StatusOK, dto.FromDomain(update))
 }

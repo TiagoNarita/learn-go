@@ -20,6 +20,8 @@ type BookmarkService interface {
 	Create(ctx context.Context, in CreateBookmarkInput) (model.Bookmark, error)
 	List(ctx context.Context, limit, offset int) ([]model.Bookmark, int, error)
 	GetById(ctx context.Context, id uuid.UUID) (model.Bookmark, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+	Update(ctx context.Context, id uuid.UUID, input CreateBookmarkInput) (model.Bookmark, error)
 }
 
 type bookmarkService struct {
@@ -48,6 +50,27 @@ func (s *bookmarkService) List(ctx context.Context, limit, offset int) ([]model.
 	return s.repo.List(ctx, limit, offset)
 }
 
-func (s bookmarkService) GetById(ctx context.Context, id uuid.UUID) (model.Bookmark, error) {
+func (s *bookmarkService) GetById(ctx context.Context, id uuid.UUID) (model.Bookmark, error) {
 	return s.repo.GetById(ctx, id)
+}
+
+func (s *bookmarkService) Update(ctx context.Context, id uuid.UUID, input CreateBookmarkInput) (model.Bookmark, error) {
+	bookmark, err := s.GetById(ctx, id)
+	if err != nil {
+		return model.Bookmark{}, err
+	}
+
+	updatedBookmark := model.Bookmark{
+		ID:    bookmark.ID,
+		URL:   input.URL,
+		Title: input.Title,
+		Tags:  input.Tags,
+		Notes: input.Notes,
+	}
+
+	return s.repo.Update(ctx, updatedBookmark)
+}
+
+func (s *bookmarkService) Delete(ctx context.Context, id uuid.UUID) error {
+	return s.repo.Delete(ctx, id)
 }

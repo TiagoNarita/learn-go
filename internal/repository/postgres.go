@@ -49,7 +49,9 @@ func (r *PostgresRepository) List(ctx context.Context, limit, offset int) ([]mod
 	const q = `
 		SELECT id, url, title, tags, notes, created_at
 		FROM bookmarks
-		ORDER BY created_at DESC LIMIT $1 OFFSET $2
+		ORDER BY created_at 
+		    DESC LIMIT $1 
+			OFFSET $2
 	`
 	rows, err := r.pool.Query(ctx, q, limit, offset)
 	if err != nil {
@@ -99,5 +101,41 @@ func (r *PostgresRepository) GetById(ctx context.Context, id uuid.UUID) (model.B
 		return model.Bookmark{}, fmt.Errorf("postgress get error: %w", err)
 	}
 
+	return out, nil
+}
+
+func (r *PostgresRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	const q = `
+		DELETE FROM bookmarks 
+		WHERE bookmarks.id = $1
+	`
+
+	exec, err := r.pool.Exec(ctx, q, id)
+
+	if err != nil {
+		return err
+	}
+
+	if exec.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *PostgresRepository) Update(ctx context.Context, bookmark model.Bookmark) (model.Bookmark, error) {
+	const q = `
+		UPDATE bookmarks Set url = $1, title = $2, tags = $3, notes = $4 
+		WHERE id = $5
+		RETURNING id, url, title, tags, notes, created_at
+	`
+	var out model.Bookmark
+	err := r.pool.QueryRow(ctx, q, bookmark.URL, bookmark.Title, bookmark.Tags, bookmark.Notes, bookmark.ID).Scan(
+		&out.ID, &out.URL, &out.Title, &out.Tags, &out.Notes, &out.CreatedAt,
+	)
+
+	if err != nil {
+		return model.Bookmark{}, fmt.Errorf("postgres create bookmark: %w", err)
+	}
 	return out, nil
 }
