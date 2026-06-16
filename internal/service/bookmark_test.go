@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	"github.com/tiagobnarita/go_learn/internal/model"
 	"github.com/tiagobnarita/go_learn/internal/repository"
@@ -14,6 +15,7 @@ type fakeRepo struct {
 	created    model.Bookmark
 	listItems  []model.Bookmark
 	listTotal  int
+	listFilter repository.BookmarkFilter
 	err        error
 	getResult  model.Bookmark
 	getErr     error
@@ -27,7 +29,8 @@ func (f *fakeRepo) Create(ctx context.Context, b model.Bookmark) (model.Bookmark
 	return b, f.err
 }
 
-func (f *fakeRepo) List(ctx context.Context, limit, offset int) ([]model.Bookmark, int, error) {
+func (f *fakeRepo) List(ctx context.Context, filter repository.BookmarkFilter) ([]model.Bookmark, int, error) {
+	f.listFilter = filter
 	return f.listItems, f.listTotal, f.err
 }
 
@@ -152,6 +155,132 @@ func TestBookmarkService_Update(t *testing.T) {
 
 		if !errors.Is(err, repository.ErrNotFound) {
 			t.Fatalf("error should be notfound, got %v", err)
+		}
+	})
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestBookmarkService_List(t *testing.T) {
+	t.Run("returns items and total from repo", func(t *testing.T) {
+		ctx := context.Background()
+		items := []model.Bookmark{{ID: uuid.New()}, {ID: uuid.New()}}
+		svc := NewBookmarkService(&fakeRepo{listItems: items, listTotal: 2})
+
+		got, total, err := svc.List(ctx, repository.BookmarkFilter{})
+		if err != nil {
+			t.Fatalf("List returned error: %v", err)
+		}
+		if len(got) != 2 || total != 2 {
+			t.Fatalf("got %d items total %d, want 2/2", len(got), total)
+		}
+	})
+
+	t.Run("passes filter through to repo", func(t *testing.T) {
+		ctx := context.Background()
+		fakeRep := &fakeRepo{}
+		svc := NewBookmarkService(fakeRep)
+		want := repository.BookmarkFilter{Tag: "go", Title: "gin", Url: "http", Limit: 10, OffSet: 20}
+
+		if _, _, err := svc.List(ctx, want); err != nil {
+			t.Fatalf("List returned error: %v", err)
+		}
+		if fakeRep.listFilter != want {
+			t.Errorf("filter passed to repo = %+v, want %+v", fakeRep.listFilter, want)
+		}
+	})
+
+	t.Run("propagates repo error", func(t *testing.T) {
+		ctx := context.Background()
+		svc := NewBookmarkService(&fakeRepo{err: errors.New("boom")})
+
+		if _, _, err := svc.List(ctx, repository.BookmarkFilter{}); err == nil {
+			t.Fatal("expected error from repo")
+		}
+	})
+}
+
+func TestBookmarkService_Patch(t *testing.T) {
+	existing := model.Bookmark{
+		ID:    uuid.New(),
+		URL:   "old-url",
+		Title: "old-title",
+		Tags:  []string{"old"},
+		Notes: "old-notes",
+	}
+
+	tests := []struct {
+		name  string
+		input PatchBookmarkInput
+		want  model.Bookmark
+	}{
+		{
+			name:  "empty patch keeps everything",
+			input: PatchBookmarkInput{},
+			want:  existing,
+		},
+		{
+			name:  "patches title only",
+			input: PatchBookmarkInput{Title: strPtr("new-title")},
+			want:  model.Bookmark{ID: existing.ID, URL: "old-url", Title: "new-title", Tags: []string{"old"}, Notes: "old-notes"},
+		},
+		{
+			name:  "patches url only",
+			input: PatchBookmarkInput{URL: strPtr("new-url")},
+			want:  model.Bookmark{ID: existing.ID, URL: "new-url", Title: "old-title", Tags: []string{"old"}, Notes: "old-notes"},
+		},
+		{
+			name:  "patches tags only",
+			input: PatchBookmarkInput{Tags: []string{"a", "b"}},
+			want:  model.Bookmark{ID: existing.ID, URL: "old-url", Title: "old-title", Tags: []string{"a", "b"}, Notes: "old-notes"},
+		},
+		{
+			name:  "patches notes only",
+			input: PatchBookmarkInput{Notes: strPtr("new-notes")},
+			want:  model.Bookmark{ID: existing.ID, URL: "old-url", Title: "old-title", Tags: []string{"old"}, Notes: "new-notes"},
+		},
+		{
+			name:  "patches all fields",
+			input: PatchBookmarkInput{URL: strPtr("u"), Title: strPtr("t"), Tags: []string{"x"}, Notes: strPtr("n")},
+			want:  model.Bookmark{ID: existing.ID, URL: "u", Title: "t", Tags: []string{"x"}, Notes: "n"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			fakeRep := &fakeRepo{getResult: existing}
+			svc := NewBookmarkService(fakeRep)
+
+			got, err := svc.Patch(ctx, existing.ID, tt.input)
+			if err != nil {
+				t.Fatalf("Patch returned error: %v", err)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("Patch() mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(tt.want, fakeRep.updated); diff != "" {
+				t.Errorf("repo received mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+
+	t.Run("when not found", func(t *testing.T) {
+		ctx := context.Background()
+		svc := NewBookmarkService(&fakeRepo{getErr: repository.ErrNotFound})
+
+		_, err := svc.Patch(ctx, uuid.New(), PatchBookmarkInput{Title: strPtr("x")})
+		if !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("error should be notfound, got %v", err)
+		}
+	})
+
+	t.Run("propagates update error", func(t *testing.T) {
+		ctx := context.Background()
+		svc := NewBookmarkService(&fakeRepo{getResult: existing, updateErr: errors.New("boom")})
+
+		if _, err := svc.Patch(ctx, existing.ID, PatchBookmarkInput{Title: strPtr("x")}); err == nil {
+			t.Fatal("expected error from repo update")
 		}
 	})
 }
