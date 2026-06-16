@@ -16,12 +16,20 @@ type CreateBookmarkInput struct {
 	Notes string
 }
 
+type PatchBookmarkInput struct {
+	URL   *string
+	Title *string
+	Tags  []string
+	Notes *string
+}
+
 type BookmarkService interface {
 	Create(ctx context.Context, in CreateBookmarkInput) (model.Bookmark, error)
-	List(ctx context.Context, limit, offset int) ([]model.Bookmark, int, error)
+	List(ctx context.Context, filter repository.BookmarkFilter) ([]model.Bookmark, int, error)
 	GetById(ctx context.Context, id uuid.UUID) (model.Bookmark, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	Update(ctx context.Context, id uuid.UUID, input CreateBookmarkInput) (model.Bookmark, error)
+	Patch(ctx context.Context, id uuid.UUID, req PatchBookmarkInput) (model.Bookmark, error)
 }
 
 type bookmarkService struct {
@@ -46,8 +54,8 @@ func (s *bookmarkService) Create(ctx context.Context, in CreateBookmarkInput) (m
 	return s.repo.Create(ctx, bookmark)
 }
 
-func (s *bookmarkService) List(ctx context.Context, limit, offset int) ([]model.Bookmark, int, error) {
-	return s.repo.List(ctx, limit, offset)
+func (s *bookmarkService) List(ctx context.Context, filter repository.BookmarkFilter) ([]model.Bookmark, int, error) {
+	return s.repo.List(ctx, filter)
 }
 
 func (s *bookmarkService) GetById(ctx context.Context, id uuid.UUID) (model.Bookmark, error) {
@@ -73,4 +81,29 @@ func (s *bookmarkService) Update(ctx context.Context, id uuid.UUID, input Create
 
 func (s *bookmarkService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
+}
+
+func (s *bookmarkService) Patch(ctx context.Context, id uuid.UUID, req PatchBookmarkInput) (model.Bookmark, error) {
+	bookmark, err := s.GetById(ctx, id)
+	if err != nil {
+		return model.Bookmark{}, err
+	}
+
+	if req.Title != nil {
+		bookmark.Title = *req.Title
+	}
+
+	if req.Tags != nil {
+		bookmark.Tags = req.Tags
+	}
+
+	if req.Notes != nil {
+		bookmark.Notes = *req.Notes
+	}
+
+	if req.URL != nil {
+		bookmark.URL = *req.URL
+	}
+
+	return s.repo.Update(ctx, bookmark)
 }

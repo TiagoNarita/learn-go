@@ -15,6 +15,15 @@ type CreateBookmarkRequest struct {
 	Notes string   `json:"notes" binding:"max=200"`
 }
 
+func (r CreateBookmarkRequest) ToInput() service.CreateBookmarkInput {
+	return service.CreateBookmarkInput{
+		URL:   r.URL,
+		Title: r.Title,
+		Tags:  r.Tags,
+		Notes: r.Notes,
+	}
+}
+
 type BookmarkResponse struct {
 	ID        uuid.UUID `json:"id"`
 	URL       string    `json:"url"`
@@ -24,19 +33,6 @@ type BookmarkResponse struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-type BookmarkListResponse struct {
-	Items []BookmarkResponse `json:"items"`
-	Total int                `json:"total"`
-}
-
-func (r CreateBookmarkRequest) ToInput() service.CreateBookmarkInput {
-	return service.CreateBookmarkInput{
-		URL:   r.URL,
-		Title: r.Title,
-		Tags:  r.Tags,
-		Notes: r.Notes,
-	}
-}
 func FromDomain(b model.Bookmark) BookmarkResponse {
 	return BookmarkResponse{
 		ID:        b.ID,
@@ -48,22 +44,13 @@ func FromDomain(b model.Bookmark) BookmarkResponse {
 	}
 }
 
-func FromDomainPagable(bookmarks []model.Bookmark, total int) BookmarkListResponse {
-	bookmarkResponse := make([]BookmarkResponse, 0, len(bookmarks))
-	for _, bookmark := range bookmarks {
-		bookmarkResponse = append(bookmarkResponse, FromDomain(bookmark))
-	}
-
-	return BookmarkListResponse{
-		Items: bookmarkResponse,
-		Total: total,
-	}
-}
-
 type BookmarkPaginationRequest struct {
 	Page  int    `form:"page" json:"page" binding:"min=1"`
 	Limit int    `form:"limit" json:"limit" binding:"min=1,max=100"`
 	Sort  string `form:"sort" json:"sort"` // e.g., "created_at_desc"
+	Tag   string `form:"tag" json:"tag"`
+	Title string `form:"title" json:"title"`
+	Url   string `form:"url" json:"url"`
 }
 
 func (p *BookmarkPaginationRequest) GetOffset() int {
@@ -81,14 +68,14 @@ func (p *BookmarkPaginationRequest) GetLimit() int {
 }
 
 type PageResponse[T any] struct {
-	Items       []T   `json:"items"`
-	TotalItems  int64 `json:"total_items"`
-	CurrentPage int   `json:"current_page"`
-	TotalPages  int   `json:"total_pages"`
-	Limit       int   `json:"limit"`
+	Items       []T `json:"items"`
+	TotalItems  int `json:"total_items"`
+	CurrentPage int `json:"current_page"`
+	TotalPages  int `json:"total_pages"`
+	Limit       int `json:"limit"`
 }
 
-func NewPageResponse[T any](items []T, totalItems int64, page, limit int) PageResponse[T] {
+func NewPageResponse[T any](items []T, totalItems int, page, limit int) PageResponse[T] {
 	totalPages := int(totalItems) / limit
 	if int(totalItems)%limit != 0 {
 		totalPages++
@@ -104,5 +91,21 @@ func NewPageResponse[T any](items []T, totalItems int64, page, limit int) PageRe
 		CurrentPage: page,
 		TotalPages:  totalPages,
 		Limit:       limit,
+	}
+}
+
+type BookmarkPatch struct {
+	URL   *string  `json:"url" binding:"omitempty,url"`
+	Title *string  `json:"title" binding:"omitempty,min=1,max=200"`
+	Tags  []string `json:"tags" binding:"omitempty,dive,min=1,max=30"`
+	Notes *string  `json:"notes" binding:"omitempty,max=200"`
+}
+
+func BookmarkPatchToInput(patch BookmarkPatch) service.PatchBookmarkInput {
+	return service.PatchBookmarkInput{
+		URL:   patch.URL,
+		Title: patch.Title,
+		Tags:  patch.Tags,
+		Notes: patch.Notes,
 	}
 }

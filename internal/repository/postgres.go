@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/tiagobnarita/go_learn/internal/model"
 )
 
@@ -36,8 +36,8 @@ func (r *PostgresRepository) Create(ctx context.Context, b model.Bookmark) (mode
 	return out, nil
 }
 
-func (r *PostgresRepository) List(ctx context.Context, limit, offset int) ([]model.Bookmark, int, error) {
-	total, err := r.countBookmarkTotal(ctx)
+func (r *PostgresRepository) List(ctx context.Context, filter BookmarkFilter) ([]model.Bookmark, int, error) {
+	total, err := r.countBookmarkTotal(ctx, filter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -46,14 +46,15 @@ func (r *PostgresRepository) List(ctx context.Context, limit, offset int) ([]mod
 		return make([]model.Bookmark, 0), 0, nil
 	}
 
-	const q = `
+	conds, args, i := createQueryFoFilter(filter)
+
+	query := `
 		SELECT id, url, title, tags, notes, created_at
 		FROM bookmarks
-		ORDER BY created_at 
-		    DESC LIMIT $1 
-			OFFSET $2
 	`
-	rows, err := r.pool.Query(ctx, q, limit, offset)
+	query, args = applyFilter(conds, query, i, args, filter)
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("postgres list bookmarks: %w", err)
 	}
@@ -73,10 +74,53 @@ func (r *PostgresRepository) List(ctx context.Context, limit, offset int) ([]mod
 	return out, total, nil
 }
 
-func (r *PostgresRepository) countBookmarkTotal(ctx context.Context) (int, error) {
+func applyFilter(conds []string, query string, i int, args []any, filter BookmarkFilter) (string, []any) {
+	if len(conds) > 0 {
+		query += " WHERE " + strings.Join(conds, " AND ")
+	}
+
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d "+
+		"OFFSET $%d", i, i+1)
+
+	args = append(args, filter.Limit)
+	args = append(args, filter.OffSet)
+	return query, args
+}
+
+func createQueryFoFilter(filter BookmarkFilter) ([]string, []any, int) {
+	conds := []string{}
+	args := []any{}
+	i := 1
+
+	if filter.Tag != "" {
+		conds = append(conds, fmt.Sprintf("tags = $%d", i))
+		args = append(args, filter.Tag)
+		i++
+	}
+
+	if filter.Title != "" {
+		conds = append(conds, fmt.Sprintf("title ILIKE $%d", i))
+		args = append(args, "%"+filter.Title+"%")
+		i++
+	}
+
+	if filter.Url != "" {
+		conds = append(conds, fmt.Sprintf("url ILIKE $%d", i))
+		args = append(args, "%"+filter.Url+"%")
+		i++
+	}
+	return conds, args, i
+}
+
+func (r *PostgresRepository) countBookmarkTotal(ctx context.Context, filter BookmarkFilter) (int, error) {
 	var total int
-	const countQuery = `SELECT COUNT(*) FROM bookmarks`
-	if err := r.pool.QueryRow(ctx, countQuery).Scan(&total); err != nil {
+	conds, args, _ := createQueryFoFilter(filter)
+	query := `SELECT COUNT(*) FROM bookmarks`
+	if len(conds) > 0 {
+		query += " WHERE " + strings.Join(conds, " AND ")
+	}
+
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("postgres count bookmarks: %w", err)
 	}
 	return total, nil
